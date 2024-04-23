@@ -988,7 +988,10 @@ class StableDiffusionPipeline(
                 # perform guidance
                 if self.do_classifier_free_guidance:
                     noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-                    noise_pred = noise_pred_uncond + self.guidance_scale * (noise_pred_text - noise_pred_uncond)
+                    # noise_pred = noise_pred_uncond + self.guidance_scale * (noise_pred_text - noise_pred_uncond)
+                    dynamic_guidance_scale = max(1, self.guidance_scale*2*i/num_inference_steps)
+                    print(f"Linear {dynamic_guidance_scale}")
+                    noise_pred = noise_pred_uncond + dynamic_guidance_scale * (noise_pred_text - noise_pred_uncond)
 
                 if self.do_classifier_free_guidance and self.guidance_rescale > 0.0:
                     # Based on 3.4. in https://arxiv.org/pdf/2305.08891.pdf
