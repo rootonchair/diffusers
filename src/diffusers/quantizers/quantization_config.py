@@ -494,6 +494,9 @@ class NunchakuLiteQuantizationConfig(QuantizationConfigMixin):
         self.compute_dtype = compute_dtype
         self.pre_quantized = kwargs.pop("pre_quantized", True)
         self.exclude_targets = kwargs.pop("exclude_targets", None)
+        # Programmatic-only: optional {module_name: 1D tensor} of precomputed
+        # smoothing scales for data-free mode; never serialized.
+        self.smooth_overrides = kwargs.pop("smooth_overrides", None)
         self.svdq_w4a4 = svdq_w4a4
         self.awq_w4a16 = awq_w4a16
 
@@ -572,6 +575,7 @@ class NunchakuLiteQuantizationConfig(QuantizationConfigMixin):
     def to_dict(self) -> dict[str, Any]:
         output = super().to_dict()
         output["compute_dtype"] = str(output["compute_dtype"]).split(".")[1]
+        output.pop("smooth_overrides", None)
         return output
 
 

@@ -140,6 +140,10 @@ class NunchakuLiteQuantizer(DiffusersQuantizer):
             packed_bias = pack_data_free_bias(param_value.to(target_device), torch_dtype=self.compute_dtype)
             module._parameters["bias"] = torch.nn.Parameter(packed_bias, requires_grad=False)
             return
+        overrides = getattr(self.quantization_config, "smooth_overrides", None) or {}
+        smooth_scale = overrides.get(module_name)
+        if smooth_scale is not None:
+            self._smooth_override_hits = getattr(self, "_smooth_override_hits", 0) + 1
         quantized = quantize_linear_data_free(
             param_value.to(target_device),
             precision=module.precision,
@@ -147,6 +151,7 @@ class NunchakuLiteQuantizer(DiffusersQuantizer):
             rank=module.rank,
             torch_dtype=self.compute_dtype,
             smooth_exponent=self.quantization_config.svdq_w4a4.get("smooth_exponent", 0.5),
+            smooth_scale=smooth_scale,
         )
         for name, tensor in quantized.items():
             module._parameters[name] = torch.nn.Parameter(tensor.to(target_device), requires_grad=False)

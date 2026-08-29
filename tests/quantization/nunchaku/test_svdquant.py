@@ -351,6 +351,26 @@ def test_smooth_exponent_flows_through():
     assert not torch.equal(strong["smooth_factor"], default["smooth_factor"])
 
 
+def test_smooth_scale_override():
+    torch.manual_seed(0)
+    weight = torch.randn(128, 128)
+    kwargs = dict(precision="int4", group_size=64, rank=0)
+    identity = quantize_linear_data_free(weight, smooth_scale=torch.ones(128), **kwargs)
+    disabled = quantize_linear_data_free(weight, smooth_exponent=0.0, **kwargs)
+    # An all-ones override is exactly "no smoothing".
+    for key in identity:
+        assert torch.equal(identity[key], disabled[key]), key
+    with pytest.raises(ValueError, match="must have 128 elements"):
+        quantize_linear_data_free(weight, smooth_scale=torch.ones(64), **kwargs)
+
+    config = NunchakuLiteQuantizationConfig(
+        svdq_w4a4={"precision": "int4", "group_size": 64, "rank": 32},
+        pre_quantized=False,
+        smooth_overrides={"blocks.0.proj": torch.ones(128)},
+    )
+    assert "smooth_overrides" not in config.to_dict()
+
+
 def test_config_validates_smooth_exponent():
     section = {"precision": "nvfp4", "group_size": 16, "rank": 32, "smooth_exponent": 0.25}
     config = NunchakuLiteQuantizationConfig(svdq_w4a4=dict(section), pre_quantized=False)

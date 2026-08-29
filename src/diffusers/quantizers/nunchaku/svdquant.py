@@ -278,6 +278,7 @@ def quantize_linear_data_free(
     rank: int,
     torch_dtype: torch.dtype = torch.bfloat16,
     smooth_exponent: float = 0.5,
+    smooth_scale: torch.Tensor | None = None,
 ) -> dict[str, torch.Tensor]:
     """Quantize one linear weight into ``SVDQW4A4Linear``'s packed parameters.
 
@@ -288,6 +289,8 @@ def quantize_linear_data_free(
         rank: Low-rank branch rank (multiple of 16, or 0 to disable).
         torch_dtype: Floating-point dtype of the produced auxiliary tensors.
         smooth_exponent: Weight-span smoothing strength in ``[0, 1]``.
+        smooth_scale: Optional precomputed per-input-channel smoothing scale
+            (shape ``[in_features]``); overrides the weight-span formula.
 
     Returns:
         Mapping with keys ``qweight``, ``wscales``, ``smooth_factor``,
@@ -299,7 +302,14 @@ def quantize_linear_data_free(
     packer = _NunchakuWeightPacker()
     weight = weight.to(dtype=torch.float32)
 
-    smooth = _weight_span_smooth_scale(weight, exponent=smooth_exponent)
+    if smooth_scale is not None:
+        if smooth_scale.numel() != in_features:
+            raise ValueError(
+                f"smooth_scale must have {in_features} elements, got {smooth_scale.numel()}."
+            )
+        smooth = smooth_scale.to(device=weight.device, dtype=torch.float32).view(-1).clamp_min(_SMOOTH_EPS)
+    else:
+        smooth = _weight_span_smooth_scale(weight, exponent=smooth_exponent)
     smoothed = weight * smooth.view(1, -1)
 
     if rank > 0:
