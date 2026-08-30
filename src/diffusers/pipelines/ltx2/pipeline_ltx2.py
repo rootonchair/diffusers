@@ -958,7 +958,7 @@ class LTX2Pipeline(DiffusionPipeline, FromSingleFileMixin, LTX2LoraLoaderMixin):
         negative_prompt_attention_mask: torch.Tensor | None = None,
         decode_timestep: float | list[float] = 0.0,
         decode_noise_scale: float | list[float] | None = None,
-        use_cross_timestep: bool = False,
+        use_cross_timestep: bool = True,
         system_prompt: str | None = None,
         enable_prompt_enhancement: bool = False,
         prompt_max_new_tokens: int | None = None,
