@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import itertools
 import math
+import os
 from contextlib import nullcontext
 from typing import Any
 
@@ -21,7 +22,13 @@ _HF_KERNEL_REPO = "rootonchair/nunchaku-lite-kernels"
 _HF_KERNEL_VERSION = 2
 
 
-if is_kernels_available():
+if os.environ.get("NUNCHAKU_LITE_LOCAL_KERNELS"):
+    # Escape hatch for kernel development: use a source-built `nunchaku_lite_kernels`
+    # package (its import registers the torch.ops library) instead of the Hub build.
+    import nunchaku_lite_kernels._C  # noqa: F401
+
+    ops = torch.ops.nunchaku_lite_kernels
+elif is_kernels_available():
     from kernels import get_kernel
 
     if not DIFFUSERS_TRUST_REMOTE_KERNELS:
@@ -120,6 +127,7 @@ class SVDQW4A4Linear(nn.Module):
         torch_dtype: torch.dtype = torch.bfloat16,
         device: str | torch.device | None = None,
         act_unsigned: bool = False,
+        hadamard: bool = False,
     ):
         super().__init__()
 
@@ -130,6 +138,7 @@ class SVDQW4A4Linear(nn.Module):
         self.group_size = group_size
         self.torch_dtype = torch_dtype
         self.act_unsigned = act_unsigned
+        self.hadamard = hadamard
 
         self.qweight = nn.Parameter(
             torch.empty(out_features, in_features // 2, dtype=torch.int8, device=device), requires_grad=False
@@ -184,16 +193,31 @@ class SVDQW4A4Linear(nn.Module):
             ascales = torch.empty(channels // 64, batch_size_pad, dtype=x.dtype, device=x.device)
         lora_act = torch.empty(batch_size_pad, self.rank, dtype=torch.float32, device=x.device)
 
-        ops.quantize_w4a4_act_fuse_lora(
-            x,
-            quantized_x,
-            ascales,
-            self.proj_down,
-            lora_act,
-            self.smooth_factor,
-            False,
-            self.precision == "nvfp4",
-        )
+        if self.hadamard:
+            # Trailing arg only exists in kernel builds with the online FWHT;
+            # non-hadamard modules keep the 8-arg call for Hub-build compatibility.
+            ops.quantize_w4a4_act_fuse_lora(
+                x,
+                quantized_x,
+                ascales,
+                self.proj_down,
+                lora_act,
+                self.smooth_factor,
+                False,
+                self.precision == "nvfp4",
+                True,
+            )
+        else:
+            ops.quantize_w4a4_act_fuse_lora(
+                x,
+                quantized_x,
+                ascales,
+                self.proj_down,
+                lora_act,
+                self.smooth_factor,
+                False,
+                self.precision == "nvfp4",
+            )
         lora_scales = [1.0] * math.ceil(self.rank / 16)
         _gemm_w4a4(
             quantized_x,
@@ -316,6 +340,7 @@ def _replace_quantize_targets(model: nn.Module, op: str, raw: Any, compute_dtype
                     precision=precision,
                     group_size=group_size,
                     torch_dtype=compute_dtype,
+                    hadamard=raw.get("hadamard", False),
                 )
             elif op == "awq_w4a16":
                 replacement = AWQW4A16Linear(

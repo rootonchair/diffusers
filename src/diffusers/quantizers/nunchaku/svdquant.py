@@ -270,6 +270,19 @@ def _group_scales(residual: torch.Tensor, group_size: int, float_point: bool) ->
     return residual.view(out_features, groups, group_size).abs().amax(dim=2).clamp_min(1e-6) / max_q
 
 
+def _hadamard64(device: torch.device) -> torch.Tensor:
+    """Orthonormal 64-point Hadamard matrix in Sylvester order.
+
+    Must stay bit-compatible with the kernel's in-register FWHT (which applies the
+    same transform, normalized by 1/8, to each 64-channel block of the activations).
+    """
+
+    h = torch.ones(1, 1, device=device, dtype=torch.float32)
+    for _ in range(6):
+        h = torch.cat([torch.cat([h, h], dim=1), torch.cat([h, -h], dim=1)], dim=0)
+    return h / 8.0
+
+
 def quantize_linear_data_free(
     weight: torch.Tensor,
     *,
@@ -278,6 +291,7 @@ def quantize_linear_data_free(
     rank: int,
     torch_dtype: torch.dtype = torch.bfloat16,
     smooth_exponent: float = 0.5,
+    hadamard: bool = False,
 ) -> dict[str, torch.Tensor]:
     """Quantize one linear weight into ``SVDQW4A4Linear``'s packed parameters.
 
@@ -288,6 +302,12 @@ def quantize_linear_data_free(
         rank: Low-rank branch rank (multiple of 16, or 0 to disable).
         torch_dtype: Floating-point dtype of the produced auxiliary tensors.
         smooth_exponent: Weight-span smoothing strength in ``[0, 1]``.
+        hadamard: Rotate the quantized residual by a blockwise (64-channel)
+            Hadamard transform. Requires a kernel build whose activation quantizer
+            applies the matching online transform (``hadamard=True`` at runtime);
+            the low-rank branch is unaffected. Rotation makes both the residual
+            and the quantized activations near-Gaussian, and replaces smoothing as
+            the outlier treatment (typically combined with ``smooth_exponent=0``).
 
     Returns:
         Mapping with keys ``qweight``, ``wscales``, ``smooth_factor``,
@@ -311,6 +331,12 @@ def quantize_linear_data_free(
         proj_up = smoothed.new_zeros((out_features, 0))
         proj_down = smoothed.new_zeros((0, in_features))
         residual = smoothed
+
+    if hadamard:
+        # y = (H x') @ (R H)^T == x' @ R^T for orthonormal symmetric H, so rotating
+        # the residual here exactly cancels the kernel's online activation FWHT.
+        h = _hadamard64(residual.device)
+        residual = (residual.view(out_features, in_features // 64, 64) @ h).reshape(out_features, in_features)
 
     groups = in_features // group_size
     state: dict[str, torch.Tensor] = {}

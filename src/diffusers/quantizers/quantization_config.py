@@ -566,6 +566,15 @@ class NunchakuLiteQuantizationConfig(QuantizationConfigMixin):
                         raise ValueError(f"Nunchaku compact config section {op!r} field 'smooth_exponent' must be a number.")
                     if not 0.0 <= smooth_exponent <= 1.0:
                         raise ValueError(f"'smooth_exponent' must be in [0, 1], got {smooth_exponent}.")
+                if "hadamard" in raw:
+                    hadamard = raw["hadamard"]
+                    if self.pre_quantized:
+                        raise ValueError(
+                            "'hadamard' only applies to data-free quantization (`pre_quantized=False`); "
+                            "a pre-quantized checkpoint already fixes its residual coordinates."
+                        )
+                    if not isinstance(hadamard, bool):
+                        raise ValueError(f"Nunchaku compact config section {op!r} field 'hadamard' must be a bool.")
             elif precision != "int4":
                 raise ValueError("Nunchaku AWQ target requires precision='int4'.")
 
